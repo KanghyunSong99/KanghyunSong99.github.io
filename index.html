@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>다이나믹 사다리 게임</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1e2a78, #ff6b6b);
+            font-family: 'Arial', sans-serif;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            background: #4a90e2;
+            color: white;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            background: #357abd;
+        }
+        #gameCanvas {
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        .player-name {
+            font-size: 18px;
+            padding: 8px 15px;
+            margin: 5px;
+            border: 2px solid #4a90e2;
+            border-radius: 20px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .player-name:hover {
+            background: #4a90e2;
+            color: white;
+            transform: scale(1.05);
+        }
+        .player-name.active {
+            background: #4a90e2;
+            color: white;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        #playerNames {
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .player-input {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            animation: fadeIn 0.3s ease-in;
+        }
+        .player-input input {
+            padding: 8px 15px;
+            border: 2px solid #4a90e2;
+            border-radius: 8px;
+            font-size: 16px;
+            width: 150px;
+        }
+        .player-input button.remove {
+            padding: 8px 12px;
+            background: #ff6b6b;
+        }
+        .player-input button.remove:hover {
+            background: #ff5252;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        #playerInputs {
+            margin-bottom: 20px;
+        }
+        .error-message {
+            color: #ff5252;
+            margin-top: 5px;
+            font-size: 14px;
+        }
+        .special-effect {
+            position: absolute;
+            font-size: 24px;
+            font-weight: bold;
+            pointer-events: none;
+            animation: floatUp 1s forwards;
+        }
+        @keyframes floatUp {
+            0% { transform: translateY(0); opacity: 1; }
+            100% { transform: translateY(-50px); opacity: 0; }
+        }
+        #resultModal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            text-align: center;
+        }
+        .result-item {
+            font-size: 20px;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 10px;
+            background: rgba(74, 144, 226, 0.1);
+            animation: slideIn 0.5s ease-out forwards;
+            opacity: 0;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(-50px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <button onclick="addPlayerInput()">플레이어 추가</button>
+            <button onclick="initGame()">게임 시작</button>
+        </div>
+        <div id="playerInputs"></div>
+        <div id="playerNames"></div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+    <div id="resultModal"></div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let players = [];
+        let ladders = [];
+        let paths = [];
+        let animations = [];
+        let specialEffects = [];
+        let revealProgress = 0;
+        let isRevealing = false;
+        let gameStarted = false;
+        let completedPaths = new Set();
+
+        const colorPalette = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4',
+            '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB',
+            '#E67E22', '#2ECC71'
+        ];
+
+        class PathAnimation {
+            constructor(path, color) {
+                this.path = path;
+                this.color = color;
+                this.progress = 0;
+                this.baseSpeed = 0.005; // Reduced from 0.01 to 0.005
+                this.currentSpeed = this.baseSpeed;
+                this.active = true;
+                this.direction = 1;
+                this.effects = [];
+                this.lastEffectCheck = 0;
+            }
+
+            update() {
+                if (!this.active) return;
+
+                // 방향에 따른 진행
+                this.progress += this.currentSpeed * this.direction;
+
+                // 특수 효과 처리
+                this.handleSpecialEffects();
+
+                // 진행 상태 확인
+                if (this.progress >= 1 || this.progress <= 0) {
+                    if (this.progress >= 1) {
+                        this.active = false;
+                        this.progress = 1;
+                        completedPaths.add(this.path.playerName);
+                        if (completedPaths.size === players.length) {
+                            showResults();
+                        }
+                    }
+                    if (this.progress <= 0) {
+                        this.progress = 0;
+                    }
+                }
+
+                // 속도 효과 시간 제한
+                if (this.currentSpeed !== this.baseSpeed) {
+                    this.speedEffectDuration = (this.speedEffectDuration || 0) + 1;
+                    if (this.speedEffectDuration > 50) {
+                        this.currentSpeed = this.baseSpeed;
+                        this.speedEffectDuration = 0;
+                    }
+                }
+            }
+
+            handleSpecialEffects() {
+                if (!this.active) return;
+
+                const currentPoint = this.getCurrentPoint();
+                
+                specialEffects.forEach(effect => {
+                    if (!effect.active) return;
+
+                    // 현재 위치와 효과 위치 사이의 거리 계산
+                    const distance = Math.hypot(effect.x - currentPoint.x, effect.y - currentPoint.y);
+                    
+                    // 효과 범위 내에 있을 때 (거리가 20픽셀 이내)
+                    if (distance < 20) {
+                        // 이전 체크 이후 충분한 시간이 지났는지 확인
+                        if (this.progress - this.lastEffectCheck > 0.1) {
+                            this.lastEffectCheck = this.progress;
+                            this.applyEffect(effect);
+                        }
+                    }
+                });
+            }
+
+            applyEffect(effect) {
+                switch(effect.type) {
+                    case 'teleport':
+                        const teleportAmount = 0.2;
+                        const newProgress = Math.min(1, this.progress + teleportAmount);
+                        if (newProgress !== this.progress) {
+                            this.progress = newProgress;
+                            this.showEffectText('순간이동!', effect.x, effect.y);
+                            effect.active = false;
+                        }
+                        break;
+                    
+                    case 'speed':
+                        const prevSpeed = this.currentSpeed;
+                        this.currentSpeed = this.baseSpeed * effect.speedMultiplier;
+                        if (prevSpeed !== this.currentSpeed) {
+                            this.showEffectText(
+                                effect.speedMultiplier > 1 ? '가속!' : '감속!',
+                                effect.x,
+                                effect.y
+                            );
+                            effect.active = false;
+                        }
+                        break;
+                    
+                    case 'jump':
+                        // 현재 위치에서 다음 가로선까지 점프
+                        const currentY = this.getCurrentPoint().y;
+                        const nextY = this.findNextHorizontalLine(currentY);
+                        if (nextY) {
+                            this.jumpToY(nextY);
+                            this.showEffectText('점프!', effect.x, effect.y);
+                            effect.active = false;
+                        }
+                        break;
+                }
+            }
+
+            getCurrentPoint() {
+                if (this.path.length < 2) return null;
+                
+                const currentIndex = Math.floor(this.progress * (this.path.length - 1));
+                const nextIndex = Math.min(currentIndex + 1, this.path.length - 1);
+                const subProgress = this.progress * (this.path.length - 1) - currentIndex;
+                
+                const currentPoint = this.path[currentIndex];
+                const nextPoint = this.path[nextIndex];
+                
+                return {
+                    x: currentPoint.x + (nextPoint.x - currentPoint.x) * subProgress,
+                    y: currentPoint.y + (nextPoint.y - currentPoint.y) * subProgress
+                };
+            }
+
+            showEffectText(text, x, y) {
+                const effectDiv = document.createElement('div');
+                effectDiv.className = 'special-effect';
+                const rect = canvas.getBoundingClientRect();
+                effectDiv.style.left = `${x + rect.left}px`;
+                effectDiv.style.top = `${y + rect.top}px`;
+                effectDiv.textContent = text;
+                document.body.appendChild(effectDiv);
+                setTimeout(() => effectDiv.remove(), 1000);
+            }
+
+            draw(ctx) {
+                if (this.path.length < 2) return;
+                
+                ctx.beginPath();
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 4;
+                
+                const currentIndex = Math.floor(this.progress * (this.path.length - 1));
+                const nextIndex = Math.min(currentIndex + 1, this.path.length - 1);
+                const subProgress = this.progress * (this.path.length - 1) - currentIndex;
+                
+                // 이동 경로 그리기
+                for (let i = 0; i < currentIndex; i++) {
+                    ctx.moveTo(this.path[i].x, this.path[i].y);
+                    ctx.lineTo(this.path[i + 1].x, this.path[i + 1].y);
+                }
+                
+                if (currentIndex < this.path.length - 1) {
+                    const currentPoint = this.path[currentIndex];
+                    const nextPoint = this.path[nextIndex];
+                    const x = currentPoint.x + (nextPoint.x - currentPoint.x) * subProgress;
+                    const y = currentPoint.y + (nextPoint.y - currentPoint.y) * subProgress;
+                    ctx.moveTo(this.path[currentIndex].x, this.path[currentIndex].y);
+                    ctx.lineTo(x, y);
+                }
+                
+                ctx.stroke();
+                
+                // 플레이어 이름과 효과 그리기
+                if (currentIndex < this.path.length) {
+                    const currentPoint = this.path[currentIndex];
+                    const nextPoint = this.path[nextIndex];
+                    const x = currentPoint.x + (nextPoint.x - currentPoint.x) * subProgress;
+                    const y = currentPoint.y + (nextPoint.y - currentPoint.y) * subProgress;
+                    
+                    // 이동 효과
+                    ctx.beginPath();
+                    ctx.fillStyle = `${this.color}33`;
+                    for (let i = 0; i < 3; i++) {
+                        const trailX = x - (this.direction * i * 10);
+                        ctx.arc(trailX, y, 8 - i * 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    
+                    // 플레이어 이름
+                    ctx.font = 'bold 16px Arial';
+                    ctx.fillStyle = this.color;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(this.path.playerName, x, y - 20);
+                }
+            }
+        }
+
+        class SpecialEffect {
+            constructor(type, x, y) {
+                this.type = type;
+                this.x = x;
+                this.y = y;
+                this.active = true;
+                this.radius = 15;
+                this.pulsePhase = 0;
+                
+                switch(type) {
+                    case 'teleport':
+                        this.distance = Math.random() * 200 - 100;
+                        break;
+                    case 'speed':
+                        this.speedMultiplier = Math.random() < 0.5 ? 2 : 0.5;
+                        break;
+                    case 'jump':
+                        this.jumpDistance = 100;
+                        break;
+                }
+            }
+
+            draw(ctx) {
+                if (!this.active) return;
+
+                // 펄스 효과
+                this.pulsePhase = (this.pulsePhase + 0.1) % (Math.PI * 2);
+                const pulseScale = 1 + Math.sin(this.pulsePhase) * 0.2;
+                const currentRadius = this.radius * pulseScale;
+
+                // 외곽선 그리기
+                ctx.beginPath();
+                ctx.strokeStyle = this.getColor();
+                ctx.lineWidth = 2;
+                ctx.arc(this.x, this.y, currentRadius, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // 내부 채우기
+                ctx.beginPath();
+                ctx.fillStyle = this.getColor() + '80';
+                ctx.arc(this.x, this.y, currentRadius * 0.8, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 효과 아이콘
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.getSymbol(), this.x, this.y);
+            }
+
+            getColor() {
+                switch(this.type) {
+                    case 'teleport': return '#9B59B6';
+                    case 'speed': return '#E67E22';
+                    case 'jump': return '#2ECC71';
+                    default: return '#95A5A6';
+                }
+            }
+
+            getSymbol() {
+                switch(this.type) {
+                    case 'teleport': return '⚡';
+                    case 'speed': return this.speedMultiplier > 1 ? '▲' : '▼';
+                    case 'jump': return '↑';
+                    default: return '?';
+                }
+            }
+        }
+
+        function addPlayerInput() {
+            const playerInputs = document.getElementById('playerInputs');
+            const inputCount = playerInputs.children.length;
+            
+            if (inputCount >= 10) {
+                alert('최대 10명까지만 참가할 수 있습니다.');
+                return;
+            }
+
+            const div = document.createElement('div');
+            div.className = 'player-input';
+            div.innerHTML = `
+                <input type="text" placeholder="플레이어 ${inputCount + 1} 이름" maxlength="10">
+                <button class="remove" onclick="removePlayerInput(this)">삭제</button>
+            `;
+            playerInputs.appendChild(div);
+        }
+
+        function removePlayerInput(button) {
+            button.parentElement.remove();
+            updatePlayerInputNumbers();
+        }
+
+        function updatePlayerInputNumbers() {
+            const inputs = document.querySelectorAll('.player-input input');
+            inputs.forEach((input, index) => {
+                input.placeholder = `플레이어 ${index + 1} 이름`;
+            });
+        }
+
+        function initGame() {
+            const inputs = document.querySelectorAll('.player-input input');
+            if (inputs.length < 2) {
+                alert('최소 2명의 플레이어가 필요합니다.');
+                return;
+            }
+
+            players = [];
+            let hasEmptyName = false;
+
+            inputs.forEach(input => {
+                const name = input.value.trim();
+                if (!name) {
+                    hasEmptyName = true;
+                    input.style.borderColor = '#ff5252';
+                    const error = document.createElement('div');
+                    error.className = 'error-message';
+                    error.textContent = '이름을 입력해주세요';
+                    if (!input.parentElement.querySelector('.error-message')) {
+                        input.parentElement.appendChild(error);
+                    }
+                } else {
+                    players.push(name);
+                }
+            });
+
+            if (hasEmptyName) return;
+
+            const minWidth = 800;
+            const playerSpacing = 120;
+            const sideMargin = 60;
+            canvas.width = Math.max(minWidth, (players.length - 1) * playerSpacing + sideMargin * 2);
+            canvas.height = 600;
+            
+            ladders = [];
+            paths = [];
+            animations = [];
+            specialEffects = [];
+            completedPaths.clear();
+            revealProgress = 0;
+            isRevealing = true;
+            gameStarted = true;
+            
+            // Generate ladders and get horizontal bridges
+            const horizontalBridges = generateLadders();
+            // Generate special effects using the horizontal bridges
+            generateSpecialEffects(horizontalBridges);
+            
+            const playerNamesDiv = document.getElementById('playerNames');
+            playerNamesDiv.innerHTML = '';
+            players.forEach((name, i) => {
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'player-name';
+                nameSpan.textContent = name;
+                nameSpan.onclick = () => startAnimation(i);
+                nameSpan.style.borderColor = colorPalette[i];
+                playerNamesDiv.appendChild(nameSpan);
+            });
+            
+            animate();
+        }
+
+        function generateSpecialEffects(horizontalBridges) {
+            const effectTypes = ['teleport', 'speed', 'jump'];
+            const effectCount = Math.floor(players.length * 1.5);
+            
+            specialEffects = [];
+            
+            // Place effects only on actual bridges
+            for (let i = 0; i < effectCount; i++) {
+                const type = effectTypes[Math.floor(Math.random() * effectTypes.length)];
+                
+                // Randomly select a bridge
+                const bridge = horizontalBridges[Math.floor(Math.random() * horizontalBridges.length)];
+                
+                // Place effect at a random point along the bridge
+                const progress = Math.random();
+                const x = bridge.x1 + (bridge.x2 - bridge.x1) * progress;
+                const y = bridge.y1;
+                
+                specialEffects.push(new SpecialEffect(type, x, y));
+            }
+        }
+
+        function generateLadders() {
+            const verticalLines = players.length;
+            const horizontalLines = Math.floor((canvas.height - 150) / 100);
+            const sideMargin = 60;
+            const spacing = (canvas.width - sideMargin * 2) / (verticalLines - 1);
+            
+            // 수직선 생성
+            for (let i = 0; i < verticalLines; i++) {
+                ladders.push({
+                    x1: sideMargin + i * spacing,
+                    y1: 80,
+                    x2: sideMargin + i * spacing,
+                    y2: canvas.height - 80,
+                    type: 'vertical'
+                });
+            }
+            
+            // 가로선 3배로 증가
+            const bridgeCount = horizontalLines * 3; // Changed from 2 to 3
+            const horizontalBridges = [];
+            
+            for (let i = 0; i < bridgeCount; i++) {
+                const y = 130 + i * 50;
+                const start = Math.floor(Math.random() * (verticalLines - 1));
+                const bridge = {
+                    x1: sideMargin + start * spacing,
+                    y1: y,
+                    x2: sideMargin + (start + 1) * spacing,
+                    y2: y,
+                    type: 'horizontal'
+                };
+                horizontalBridges.push(bridge);
+                ladders.push(bridge);
+            }
+
+            // 결과 설정 (꽝 하나, 나머지 통과)
+            const failIndex = Math.floor(Math.random() * players.length);
+            results = players.map((_, index) => ({
+                position: index,
+                result: index === failIndex ? '꽝!' : '통과!'
+            }));
+            
+            return horizontalBridges; // Return the horizontal bridges for effect placement
+        }
+
+        function findPath(startX, startY, endY) {
+            const path = [{x: startX, y: startY}];
+            let currentX = startX;
+            let currentY = startY;
+            
+            while (currentY < endY) {
+                const horizontalLadder = ladders.find(l => 
+                    l.type === 'horizontal' && 
+                    l.y1 === currentY &&
+                    (l.x1 === currentX || l.x2 === currentX)
+                );
+                
+                if (horizontalLadder) {
+                    const newX = horizontalLadder.x1 === currentX ? horizontalLadder.x2 : horizontalLadder.x1;
+                    path.push({x: newX, y: currentY});
+                    currentX = newX;
+                }
+                
+                const nextY = ladders.find(l => 
+                    l.type === 'horizontal' && 
+                    l.y1 > currentY
+                )?.y1 || endY;
+                
+                path.push({x: currentX, y: nextY});
+                currentY = nextY;
+            }
+            
+            return path;
+        }
+
+        function startAnimation(playerIndex) {
+            if (!gameStarted || isRevealing) return;
+            
+            const playerName = players[playerIndex];
+            const existingAnimation = animations.find(a => a.path.playerName === playerName);
+            if (existingAnimation && existingAnimation.active) return;
+
+            const nameSpan = document.querySelector(`.player-name:nth-child(${playerIndex + 1})`);
+            if (nameSpan) {
+                document.querySelectorAll('.player-name').forEach(span => span.classList.remove('active'));
+                nameSpan.classList.add('active');
+            }
+            
+            const sideMargin = 60;
+            const spacing = (canvas.width - sideMargin * 2) / (players.length - 1);
+            const startX = sideMargin + playerIndex * spacing;
+            const path = findPath(startX, 80, canvas.height - 80);
+            path.playerName = playerName;
+            
+            const animation = new PathAnimation(path, colorPalette[playerIndex]);
+            animations.push(animation);
+            
+            // 애니메이션이 시작되면 animate 함수 호출
+            if (!isAnimating) {
+                isAnimating = true;
+                animate();
+            }
+        }
+
+        let isAnimating = false;
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (isRevealing) {
+                revealProgress += 0.02;
+                if (revealProgress >= 1) {
+                    isRevealing = false;
+                    revealProgress = 1;
+                }
+            }
+            
+            drawGame();
+            
+            let needsAnimation = isRevealing;
+            animations.forEach(animation => {
+                animation.update();
+                animation.draw(ctx);
+                if (animation.active) needsAnimation = true;
+            });
+            
+            if (needsAnimation) {
+                requestAnimationFrame(animate);
+            } else {
+                isAnimating = false;
+            }
+        }
+
+        function drawGame() {
+            // Background
+            const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+            gradient.addColorStop(0, '#ffffff');
+            gradient.addColorStop(1, '#f0f0f0');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Ladders with reveal effect
+            ladders.forEach(ladder => {
+                ctx.beginPath();
+                ctx.strokeStyle = '#333333';
+                ctx.lineWidth = 2;
+                
+                if (ladder.type === 'vertical') {
+                    const height = ladder.y2 - ladder.y1;
+                    ctx.moveTo(ladder.x1, ladder.y1);
+                    ctx.lineTo(ladder.x1, ladder.y1 + height * revealProgress);
+                } else {
+                    if (ladder.y1 <= ladder.y1 + (canvas.height - 160) * revealProgress) {
+                        ctx.moveTo(ladder.x1, ladder.y1);
+                        ctx.lineTo(ladder.x2, ladder.y2);
+                    }
+                }
+                ctx.stroke();
+            });
+            
+            // Special effects
+            if (!isRevealing) {
+                specialEffects.forEach(effect => {
+                    if (effect.active) {
+                        effect.draw(ctx);
+                    }
+                });
+            }
+            
+            // Player names at top
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            const sideMargin = 60;
+            const spacing = (canvas.width - sideMargin * 2) / (players.length - 1);
+            players.forEach((name, i) => {
+                const x = sideMargin + i * spacing;
+                ctx.fillStyle = colorPalette[i];
+                ctx.fillText(name, x, 60);
+            });
+        }
+
+        function showResults() {
+            const modal = document.getElementById('resultModal');
+            modal.style.display = 'block';
+            modal.innerHTML = '<h2>🎉 게임 결과 🎉</h2>';
+            
+            const resultsList = Array.from(completedPaths).map(playerName => {
+                const playerIndex = players.indexOf(playerName);
+                const result = results[playerIndex];
+                return {
+                    name: playerName,
+                    result: result.result
+                };
+            });
+
+            resultsList.forEach((result, index) => {
+                setTimeout(() => {
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'result-item';
+                    const isLose = result.result === '꽝!';
+                    resultItem.style.background = isLose ? 'rgba(255, 0, 0, 0.1)' : 'rgba(0, 255, 0, 0.1)';
+                    resultItem.innerHTML = `
+                        <span style="color: ${isLose ? 'red' : 'green'}">
+                            ${result.name}: ${result.result}
+                        </span>
+                    `;
+                    resultItem.style.animationDelay = `${index * 0.3}s`;
+                    modal.appendChild(resultItem);
+                    
+                    if (index === resultsList.length - 1) {
+                        setTimeout(() => {
+                            const playAgainBtn = document.createElement('button');
+                            playAgainBtn.textContent = '다시 하기';
+                            playAgainBtn.onclick = () => {
+                                modal.style.display = 'none';
+                                gameStarted = false;
+                                document.querySelectorAll('.player-name').forEach(span => {
+                                    span.classList.remove('active');
+                                });
+                            };
+                            modal.appendChild(playAgainBtn);
+                        }, 1000);
+                    }
+                }, index * 300);
+            });
+        }
+
+        let results = [];
+
+        // Add initial two player inputs
+        addPlayerInput();
+        addPlayerInput();
+    </script>
+</body>
+</html> 
